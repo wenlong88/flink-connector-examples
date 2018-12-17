@@ -18,32 +18,27 @@
 
 package org.apache.flink.connectors.example.source;
 
-import org.apache.flink.api.common.functions.MapFunction;
+import java.util.LinkedList;
+import java.util.List;
+
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.api.java.StreamTableEnvironment;
+import org.apache.flink.table.sources.DefinedRowtimeAttributes;
+import org.apache.flink.table.sources.RowtimeAttributeDescriptor;
 import org.apache.flink.table.sources.StreamTableSource;
+import org.apache.flink.table.sources.tsextractors.StreamRecordTimestamp;
+import org.apache.flink.table.sources.wmstrategies.PreserveWatermarks;
+import org.apache.flink.table.typeutils.TimeIndicatorTypeInfo;
 
-public class ExampleStreamTableSource implements StreamTableSource<Integer> {
-
-	private String name;
-
-	public ExampleStreamTableSource(String name) {
-		this.name = name;
-	}
-
+public class EventTimeTableSoure implements StreamTableSource<Integer>,DefinedRowtimeAttributes {
 	@Override
 	public DataStream<Integer> getDataStream(StreamExecutionEnvironment execEnv) {
-		return execEnv.fromElements(1, 2,3,4,5,6,7,8,9,10).name(name)
-				.map(new MapFunction<Integer, Integer>() {
-			@Override
-			public Integer map(Integer input) throws Exception {
-				return input + 10;
-			}
-		});
+		return execEnv.addSource(new EventTimeExample());
 	}
 
 	@Override
@@ -53,22 +48,40 @@ public class ExampleStreamTableSource implements StreamTableSource<Integer> {
 
 	@Override
 	public TableSchema getTableSchema() {
-		return TableSchema.builder().field("v", TypeInformation.of(Integer.class)).build();
+		return TableSchema.builder()
+				.field("v", TypeInformation.of(Integer.class))
+				.field("rowTime", TimeIndicatorTypeInfo.ROWTIME_INDICATOR())
+				.build();
 	}
 
 	@Override
-	public String explainSource(){
-		return name;
+	public List<RowtimeAttributeDescriptor> getRowtimeAttributeDescriptors() {
+		List<RowtimeAttributeDescriptor> descriptors = new LinkedList<>();
+		RowtimeAttributeDescriptor rowtimeAttributeDescriptor =
+				// 保留datastream里的event time和watermark
+				new RowtimeAttributeDescriptor(
+						"rowTime",
+						new StreamRecordTimestamp(),
+						new PreserveWatermarks());
+		descriptors.add(rowtimeAttributeDescriptor);
+		return descriptors;
+	}
+
+	@Override
+	public String explainSource() {
+		return "1";
 	}
 
 	public static void main(String[] args) throws Exception {
 		StreamExecutionEnvironment execEnv = StreamExecutionEnvironment.getExecutionEnvironment();
 		execEnv.setParallelism(2);
 		execEnv.enableCheckpointing(3000);
+		execEnv.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
 		StreamTableEnvironment env =
 				new StreamTableEnvironment(execEnv, new TableConfig());
-		env.registerTableSource("Test", new ExampleStreamTableSource("TestSource"));
-		env.toAppendStream(env.sqlQuery("select v from Test"), Integer.class).print();
+		env.registerTableSource("Test", new EventTimeTableSoure());
+		env.toAppendStream(env.sqlQuery("select count(v) from Test group by " +
+				"Tumble(rowTime, interval '1' second)"), Long.class).print();
 		env.execEnv().execute();
 	}
 }

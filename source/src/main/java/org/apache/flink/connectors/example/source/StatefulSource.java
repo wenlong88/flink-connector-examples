@@ -33,7 +33,9 @@ import org.apache.flink.streaming.api.functions.source.ParallelSourceFunction;
  * Call sequence:
  *    1. initializeState()
  *    2. open()
- *    3.
+ *    3. run()
+ *    4. snapshotState()
+ *    5. checkpointComplete()
  */
 public class StatefulSource
 		extends AbstractRichFunction

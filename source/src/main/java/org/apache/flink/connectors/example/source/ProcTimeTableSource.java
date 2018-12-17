@@ -18,6 +18,8 @@
 
 package org.apache.flink.connectors.example.source;
 
+import java.sql.Timestamp;
+
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -25,13 +27,27 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.api.java.StreamTableEnvironment;
+import org.apache.flink.table.sources.DefinedProctimeAttribute;
 import org.apache.flink.table.sources.StreamTableSource;
+import org.apache.flink.table.typeutils.TimeIndicatorTypeInfo;
 
-public class ExampleStreamTableSource implements StreamTableSource<Integer> {
+public class ProcTimeTableSource implements StreamTableSource<Integer>,DefinedProctimeAttribute {
+
+	@Override
+	public TableSchema getTableSchema() {
+		return TableSchema.builder()
+				.field("v", TypeInformation.of(Integer.class))
+				.field("ts", TimeIndicatorTypeInfo.PROCTIME_INDICATOR()).build();
+	}
+
+	@Override
+	public String getProctimeAttribute() {
+		return "ts";
+	}
 
 	private String name;
 
-	public ExampleStreamTableSource(String name) {
+	public ProcTimeTableSource(String name) {
 		this.name = name;
 	}
 
@@ -51,10 +67,6 @@ public class ExampleStreamTableSource implements StreamTableSource<Integer> {
 		return TypeInformation.of(Integer.class);
 	}
 
-	@Override
-	public TableSchema getTableSchema() {
-		return TableSchema.builder().field("v", TypeInformation.of(Integer.class)).build();
-	}
 
 	@Override
 	public String explainSource(){
@@ -67,8 +79,9 @@ public class ExampleStreamTableSource implements StreamTableSource<Integer> {
 		execEnv.enableCheckpointing(3000);
 		StreamTableEnvironment env =
 				new StreamTableEnvironment(execEnv, new TableConfig());
-		env.registerTableSource("Test", new ExampleStreamTableSource("TestSource"));
-		env.toAppendStream(env.sqlQuery("select v from Test"), Integer.class).print();
+		env.registerTableSource("Test", new ProcTimeTableSource("TestSource"));
+		env.toAppendStream(env.sqlQuery("select ts from Test"), Timestamp.class).print();
 		env.execEnv().execute();
 	}
+
 }

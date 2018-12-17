@@ -18,63 +18,76 @@
 
 package org.apache.flink.connectors.example.sink;
 
+import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.common.typeinfo.Types;
+import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.typeutils.TupleTypeInfo;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.api.java.StreamTableEnvironment;
 import org.apache.flink.table.sinks.AppendStreamTableSink;
+import org.apache.flink.table.sinks.RetractStreamTableSink;
 import org.apache.flink.table.sinks.TableSink;
 import org.apache.flink.util.Preconditions;
 
-public class ExampleStreamTableSink implements AppendStreamTableSink<Integer> {
+public class SimpleExampleStreamTableSink implements RetractStreamTableSink<Integer> {
 
-	private String[] names;
-	private TypeInformation<?>[] types;
+	private String[] names = new String[]{"v"};
+	private TypeInformation<?>[] types = new TypeInformation[]{TypeInformation.of(Integer.class)};
 
-	public ExampleStreamTableSink() {
-		names = new String[]{"v"};
-		types = new TypeInformation[]{TypeInformation.of(Integer.class)};
+	public SimpleExampleStreamTableSink() {
 	}
 
-	public ExampleStreamTableSink(String[] names, TypeInformation<?>[] types) {
+	public SimpleExampleStreamTableSink(String[] names, TypeInformation<?>[] types) {
 		this.names = names;
 		this.types = types;
 	}
 
 	@Override
-	public void emitDataStream(DataStream<Integer> dataStream) {
-		dataStream.addSink(new SimpleAsyncSinkFunction());
+	public void emitDataStream(DataStream<Tuple2<Boolean, Integer>> dataStream) {
+		dataStream.map(new MapFunction<Tuple2<Boolean,Integer>, String>() {
+			@Override
+			public String map(Tuple2<Boolean, Integer> recordWithRetract) throws Exception {
+				if (recordWithRetract.f0) {
+					return "Add " + recordWithRetract.f1;
+				} else {
+					return "Retract " + recordWithRetract.f1;
+				}
+			}
+		}).print();
 	}
 
 	@Override
-	public TypeInformation<Integer> getOutputType() {
+	public TypeInformation<Integer> getRecordType() {
 		return TypeInformation.of(Integer.class);
+	}
+
+	@Override
+	public TupleTypeInfo<Tuple2<Boolean, Integer>> getOutputType() {
+		return new TupleTypeInfo(Types.BOOLEAN, getRecordType());
 	}
 
 	@Override
 	public String[] getFieldNames() {
 		return names;
 	}
-
 	@Override
 	public TypeInformation<?>[] getFieldTypes() {
 		return types;
 	}
 
 	@Override
-	public TableSink<Integer> configure(String[] fieldNames, TypeInformation<?>[] fieldTypes) {
-
+	public TableSink<Tuple2<Boolean, Integer>> configure(String[] fieldNames, TypeInformation<?>[] fieldTypes) {
 		Preconditions.checkArgument(fieldNames.length == 1);
 		Preconditions.checkArgument(fieldTypes.length == 1);
 		Preconditions.checkArgument(fieldTypes[0].equals(TypeInformation.of(Integer.class)));
-		return new ExampleStreamTableSink(fieldNames, fieldTypes);
+		return new SimpleExampleStreamTableSink(fieldNames, fieldTypes);
 	}
 
 	public static void main(String[] args) throws Exception {
 		StreamExecutionEnvironment execEnv = StreamExecutionEnvironment.getExecutionEnvironment();
-		execEnv.setParallelism(2);
-		execEnv.enableCheckpointing(3000);
 		StreamTableEnvironment env =
 				new StreamTableEnvironment(execEnv, new TableConfig());
 		env.registerDataStream(
@@ -83,9 +96,7 @@ public class ExampleStreamTableSink implements AppendStreamTableSink<Integer> {
 				"v");
 		env.registerTableSink(
 				"Sink",
-				new String[]{"field"},
-				new TypeInformation<?>[]{TypeInformation.of(Integer.class)},
-				new ExampleStreamTableSink());
+				new SimpleExampleStreamTableSink());
 		env.sqlUpdate("insert into Sink select v from Test");
 		env.execEnv().execute();
 	}
